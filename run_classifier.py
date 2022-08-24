@@ -13,10 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """BERT finetuning runner."""
-'''
-run_classifier.py:适用的任务为分类任务,如CoLA、MRPC、MultiNLI等
-
-'''
 
 from __future__ import absolute_import
 from __future__ import division

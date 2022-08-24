@@ -238,9 +238,17 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
 
   return model_fn
 
+# 作用:针对的是语言模型对MASK起来的标签的预测，
+# 即上下文语境预测当前词，并计算 MLM 的 训练 loss
+def get_masked_lm_output(
+  bert_config,     # bert 配置
+  input_tensor,    # BertModel的最后一层sequence_output输出（[batch_size, seq_length, hidden_size]）
+  output_weights,  # embedding_table，用来反embedding，这样就映射到token的学习了
+  positions,
+  label_ids, 
+  label_weights):
 
-def get_masked_lm_output(bert_config, input_tensor, output_weights, positions,
-                         label_ids, label_weights):
+
   """Get loss and log probs for the masked LM."""
   input_tensor = gather_indexes(input_tensor, positions)
 
