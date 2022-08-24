@@ -64,7 +64,8 @@ flags.DEFINE_float(
     "Probability of creating sequences which are shorter than the "
     "maximum length.")
 
-
+# 构造训练样本
+# 定义一个训练样本的类
 class TrainingInstance(object):
   """A single training instance (sentence pair)."""
 
@@ -197,6 +198,7 @@ def create_training_instances(input_files, tokenizer, max_seq_length,
         line = line.strip()
 
         # Empty lines are used as document delimiters
+        # 空行表示文本分割
         if not line:
           all_documents.append([])
         tokens = tokenizer.tokenize(line)
@@ -204,11 +206,13 @@ def create_training_instances(input_files, tokenizer, max_seq_length,
           all_documents[-1].append(tokens)
 
   # Remove empty documents
+  # 删除空文档
   all_documents = [x for x in all_documents if x]
   rng.shuffle(all_documents)
 
   vocab_words = list(tokenizer.vocab.keys())
   instances = []
+  #重复dupe_factor次
   for _ in range(dupe_factor):
     for document_index in range(len(all_documents)):
       instances.extend(
@@ -237,6 +241,7 @@ def create_instances_from_document(
   # The `target_seq_length` is just a rough target however, whereas
   # `max_seq_length` is a hard limit.
   target_seq_length = max_num_tokens
+  # 以short_seq_prob的概率随机生成（2, max_num_tokens）的长度
   if rng.random() < short_seq_prob:
     target_seq_length = rng.randint(2, max_num_tokens)
 
@@ -253,11 +258,14 @@ def create_instances_from_document(
     segment = document[i]
     current_chunk.append(segment)
     current_length += len(segment)
+     # 将句子依次加入current_chunk中，直到加完或者达到限制的最大长度
     if i == len(document) - 1 or current_length >= target_seq_length:
       if current_chunk:
+        # `a_end`是第一个句子A结束的下标
         # `a_end` is how many segments from `current_chunk` go into the `A`
         # (first) sentence.
         a_end = 1
+         # 随机选取切分边界
         if len(current_chunk) >= 2:
           a_end = rng.randint(1, len(current_chunk) - 1)
 
@@ -267,7 +275,9 @@ def create_instances_from_document(
 
         tokens_b = []
         # Random next
+        # 是否随机next
         is_random_next = False
+        # 构建随机的下一句
         if len(current_chunk) == 1 or rng.random() < 0.5:
           is_random_next = True
           target_b_length = target_seq_length - len(tokens_a)
@@ -276,6 +286,9 @@ def create_instances_from_document(
           # corpora. However, just to be careful, we try to make sure that
           # the random document is not the same as the document
           # we're processing.
+          # 随机的挑选另外一篇文档的随机开始的句子
+          # 但是理论上有可能随机到的文档就是当前文档，因此需要一个while循环
+          # 这里只while循环10次，理论上还是有重复的可能性，但是我们忽略
           for _ in range(10):
             random_document_index = rng.randint(0, len(all_documents) - 1)
             if random_document_index != document_index:
@@ -287,6 +300,8 @@ def create_instances_from_document(
             tokens_b.extend(random_document[j])
             if len(tokens_b) >= target_b_length:
               break
+          # 对于上述构建的随机下一句，我们并没有真正地使用它们
+          # 所以为了避免数据浪费，我们将其“放回”
           # We didn't actually use these segments so we "put them back" so
           # they don't go to waste.
           num_unused_segments = len(current_chunk) - a_end
@@ -338,12 +353,13 @@ def create_instances_from_document(
 MaskedLmInstance = collections.namedtuple("MaskedLmInstance",
                                           ["index", "label"])
 
-
+# 随机MASK
 def create_masked_lm_predictions(tokens, masked_lm_prob,
                                  max_predictions_per_seq, vocab_words, rng):
   """Creates the predictions for the masked LM objective."""
 
   cand_indexes = []
+   # [CLS]和[SEP]不能用于MASK
   for (i, token) in enumerate(tokens):
     if token == "[CLS]" or token == "[SEP]":
       continue
@@ -390,18 +406,21 @@ def create_masked_lm_predictions(tokens, masked_lm_prob,
 
       masked_token = None
       # 80% of the time, replace with [MASK]
+      # 以80%的概率用[MASK]替换
       if rng.random() < 0.8:
         masked_token = "[MASK]"
       else:
         # 10% of the time, keep original
+        # 以10%的概率不进行替换
         if rng.random() < 0.5:
           masked_token = tokens[index]
         # 10% of the time, replace with random word
+        # 以10%的概率随机替换
         else:
           masked_token = vocab_words[rng.randint(0, len(vocab_words) - 1)]
 
       output_tokens[index] = masked_token
-
+      # 按照下标重排，保证是原来句子中出现的顺序
       masked_lms.append(MaskedLmInstance(index=index, label=tokens[index]))
   assert len(masked_lms) <= num_to_predict
   masked_lms = sorted(masked_lms, key=lambda x: x.index)

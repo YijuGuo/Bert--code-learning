@@ -121,6 +121,8 @@ def printable_text(text):
 def load_vocab(vocab_file):
   """Loads a vocabulary file into a dictionary."""
   vocab = collections.OrderedDict()
+  #OrderedDict可以解决无序情况，它内部维护着一个根据插入顺序排序的双向链表，
+  #另外，对一个已经存在的键的重复复制不会改变键的顺序。 
   index = 0
   with tf.gfile.GFile(vocab_file, "r") as reader:
     while True:
@@ -151,13 +153,14 @@ def convert_ids_to_tokens(inv_vocab, ids):
 
 def whitespace_tokenize(text):
   """Runs basic whitespace cleaning and splitting on a piece of text."""
+  #按照空格切分每个词，并且去除两边多余的空白
   text = text.strip()
   if not text:
     return []
   tokens = text.split()
   return tokens
 
-
+# 先进行BasicTokenizer，后进行WordpieceTokenizer
 class FullTokenizer(object):
   """Runs end-to-end tokenziation."""
 
@@ -181,7 +184,7 @@ class FullTokenizer(object):
   def convert_ids_to_tokens(self, ids):
     return convert_by_vocab(self.inv_vocab, ids)
 
-
+#中文字符的切分
 class BasicTokenizer(object):
   """Runs basic tokenization (punctuation splitting, lower casing, etc.)."""
 
@@ -195,8 +198,8 @@ class BasicTokenizer(object):
 
   def tokenize(self, text):
     """Tokenizes a piece of text."""
-    text = convert_to_unicode(text)
-    text = self._clean_text(text)
+    text = convert_to_unicode(text) #转换为unicode编码
+    text = self._clean_text(text) #替换不合法字符以及多余的空格
 
     # This was added on November 1st, 2018 for the multilingual and Chinese
     # models. This is also applied to the English models now, but it doesn't
@@ -204,21 +207,25 @@ class BasicTokenizer(object):
     # and generally don't have any Chinese data in them (there are Chinese
     # characters in the vocabulary because Wikipedia does have some Chinese
     # words in the English Wikipedia.).
-    text = self._tokenize_chinese_chars(text)
+    text = self._tokenize_chinese_chars(text) #对中文进行编码
 
-    orig_tokens = whitespace_tokenize(text)
+    orig_tokens = whitespace_tokenize(text) #中文字符旁边加空格
     split_tokens = []
     for token in orig_tokens:
       if self.do_lower_case:
-        token = token.lower()
-        token = self._run_strip_accents(token)
-      split_tokens.extend(self._run_split_on_punc(token))
+        token = token.lower() #小写
+        token = self._run_strip_accents(token) #替换变音字符
+      split_tokens.extend(self._run_split_on_punc(token)) #标点字符的切分
 
     output_tokens = whitespace_tokenize(" ".join(split_tokens))
     return output_tokens
 
   def _run_strip_accents(self, text):
-    """Strips accents from a piece of text."""
+    """
+    Strips accents from a piece of text.
+    _run_strip_accents会将变音字符替换掉如résumé中的é会被替换为e
+    
+    """
     text = unicodedata.normalize("NFD", text)
     output = []
     for char in text:
@@ -236,7 +243,7 @@ class BasicTokenizer(object):
     output = []
     while i < len(chars):
       char = chars[i]
-      if _is_punctuation(char):
+      if _is_punctuation(char): #判断是否是标点
         output.append([char])
         start_new_word = True
       else:
@@ -249,7 +256,10 @@ class BasicTokenizer(object):
     return ["".join(x) for x in output]
 
   def _tokenize_chinese_chars(self, text):
-    """Adds whitespace around any CJK character."""
+    """
+    Adds whitespace around any CJK character.
+    对中文进行编码
+    """
     output = []
     for char in text:
       cp = ord(char)
@@ -284,7 +294,9 @@ class BasicTokenizer(object):
     return False
 
   def _clean_text(self, text):
-    """Performs invalid character removal and whitespace cleanup on text."""
+    """Performs invalid character removal and whitespace cleanup on text.
+    替换不合法字符以及多余的空格，比如\t,\n会被替换为两个标准空格
+    """
     output = []
     for char in text:
       cp = ord(char)
@@ -296,7 +308,10 @@ class BasicTokenizer(object):
         output.append(char)
     return "".join(output)
 
-
+#切分英文单词，例如英文中存在的不同的语态
+#遍历一个英文单词里面的小结构，如果发现在词表里找到，就把这个切掉
+# 对未被切分的部分继续进行步骤一，直至所有都被切分干净，
+# 注意除了第一个，其他的前面都要加上"##"
 class WordpieceTokenizer(object):
   """Runs WordPiece tokenziation."""
 

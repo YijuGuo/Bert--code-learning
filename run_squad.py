@@ -13,6 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Run BERT on SQuAD 1.1 and SQuAD 2.0."""
+"""
+适用于阅读理解任务
+"""
 
 from __future__ import absolute_import
 from __future__ import division

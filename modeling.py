@@ -13,7 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """The main BERT model and related functions."""
-
+"""
+模型定义
+"""
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
@@ -29,7 +31,7 @@ import tensorflow as tf
 
 
 class BertConfig(object):
-  """Configuration for `BertModel`."""
+  """Configuration for `BertModel`.BertConfig的类,这里自定义了一些参数及数值。"""
 
   def __init__(self,
                vocab_size,
@@ -43,7 +45,20 @@ class BertConfig(object):
                max_position_embeddings=512,
                type_vocab_size=16,
                initializer_range=0.02):
+    
     """Constructs BertConfig.
+
+    
+    vocab_size --> 词表的大小，用别人的词表，这个参数已经固定
+    hidden_size --> 隐层神经元个数
+    num_hidden_layers --> encoder的层数
+    num_attention_heads -->注意力头的个数
+    intermediate_size --> 中间层神经元个数
+    hidden_act --> 隐层激活函数
+    hidden_dropout_prob --> 在全连接层中实施Dropout,被去掉的概率
+    attention_probs_dropout_prob --> 注意力层dropout比例
+    max_position_embeddings --> 最大位置数目
+    initializer_range --> truncated_normal_initializer的stdev,用来初始化权重参数,从普通正态分布中标准差为0.02的分布中取样出一部分参数，作为初始化权重
 
     Args:
       vocab_size: Vocabulary size of `inputs_ids` in `BertModel`.
@@ -161,7 +176,9 @@ class BertModel(object):
     input_shape = get_shape_list(input_ids, expected_rank=2)
     batch_size = input_shape[0]
     seq_length = input_shape[1]
-
+# 为了保持一致，如果没有MASK，自动添加为全为1的
+# token_type_ids全为0
+# 目的是为了后面word embedding做准备
     if input_mask is None:
       input_mask = tf.ones(shape=[batch_size, seq_length], dtype=tf.int32)
 
@@ -406,20 +423,24 @@ def embedding_lookup(input_ids,
   if input_ids.shape.ndims == 2:
     input_ids = tf.expand_dims(input_ids, axis=[-1])
 
+  # 构建[vocab_size,embedding_size]的embedding_table
+  # vocab_size 和 embedding_size 都是固定好的，训练的时候不能乱改
   embedding_table = tf.get_variable(
       name=word_embedding_name,
-      shape=[vocab_size, embedding_size],
+      shape=[vocab_size, embedding_size], 
       initializer=create_initializer(initializer_range))
 
   flat_input_ids = tf.reshape(input_ids, [-1])
-  if use_one_hot_embeddings:
+  if use_one_hot_embeddings: #一般为False，是对TPU加速用的
     one_hot_input_ids = tf.one_hot(flat_input_ids, depth=vocab_size)
     output = tf.matmul(one_hot_input_ids, embedding_table)
   else:
+    #在embedding_table中进行查找
     output = tf.gather(embedding_table, flat_input_ids)
 
   input_shape = get_shape_list(input_ids)
-
+  # reshape output
+  # output-->(batch_size, max_seq_length,hidden_size)
   output = tf.reshape(output,
                       input_shape[0:-1] + [input_shape[-1] * embedding_size])
   return (output, embedding_table)
@@ -555,11 +576,12 @@ def create_attention_mask_from_input_mask(from_tensor, to_mask):
   return mask
 
 
-def attention_layer(from_tensor,
-                    to_tensor,
+def attention_layer(from_tensor, #构建q矩阵
+                    to_tensor,   #构建k和v矩阵
                     attention_mask=None,
                     num_attention_heads=1,
                     size_per_head=512,
+                    # q,k,v 矩阵激活函数
                     query_act=None,
                     key_act=None,
                     value_act=None,
@@ -663,6 +685,7 @@ def attention_layer(from_tensor,
   to_tensor_2d = reshape_to_matrix(to_tensor)
 
   # `query_layer` = [B*F, N*H]
+  # q矩阵由from tensor产生
   query_layer = tf.layers.dense(
       from_tensor_2d,
       num_attention_heads * size_per_head,
@@ -686,7 +709,7 @@ def attention_layer(from_tensor,
       name="value",
       kernel_initializer=create_initializer(initializer_range))
 
-  # `query_layer` = [B, N, F, H]
+  # `query_layer` = [B, N, F, H] #加速内积
   query_layer = transpose_for_scores(query_layer, batch_size,
                                      num_attention_heads, from_seq_length,
                                      size_per_head)
@@ -704,18 +727,30 @@ def attention_layer(from_tensor,
 
   if attention_mask is not None:
     # `attention_mask` = [B, 1, F, T]
+    # attention_mask 扩展一个维度
     attention_mask = tf.expand_dims(attention_mask, axis=[1])
 
     # Since attention_mask is 1.0 for positions we want to attend and 0.0 for
     # masked positions, this operation will create a tensor which is 0.0 for
     # positions we want to attend and -10000.0 for masked positions.
+    # 想要关注的位置是1.0，想要屏蔽的位置是0.0
+    # 这个操作将创建一个张量，这个张量对于我们想要参加的位置来说是0.0，
+    # 对于被屏蔽的位置来说是-10000.0。
+    # 我们要关注的位置是0.0，而被屏蔽的位置是-10000.0。
+    # tf.cast方法只是转换数据类型
+    # 用x代表attention_mask，（1-x）* (-10000)
+    # 当attention_mask为1时，上式为0，表示需要关注的位置
+    # 当attention_mask为0时,上式为-10000，表示被遮蔽的位置
+
     adder = (1.0 - tf.cast(attention_mask, tf.float32)) * -10000.0
 
     # Since we are adding it to the raw scores before the softmax, this is
     # effectively the same as removing these entirely.
+    # 因为我们是在softmax之前将其加入原始分数，这实际上与完全删除这些分数相同
     attention_scores += adder
 
   # Normalize the attention scores to probabilities.
+  # 将注意力的分数归纳为概率
   # `attention_probs` = [B, N, F, T]
   attention_probs = tf.nn.softmax(attention_scores)
 
